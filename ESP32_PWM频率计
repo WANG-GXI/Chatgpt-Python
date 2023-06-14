@@ -1,0 +1,100 @@
+//Arduino-ESP32：
+//【1】利用U8g2显示当前频率，oled引脚为18  19
+//【2】默认13输出8khz的pwm，14是检测引脚
+//【3】nvs不用管，项目无需要可删除
+// 引入所需的库
+#include <Arduino.h>
+#include <U8g2lib.h>
+#include <nvs_flash.h>
+// 定义PWM输出引脚
+#define LED 13
+// 定义外部PWM输入引脚
+const int PWM_INPUT_PIN = 14,Number=1;
+U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, 18, 19, U8X8_PIN_NONE);
+// 定义变量
+unsigned long pulseStartTime = 0;
+unsigned long pulseEndTime = 0;
+volatile unsigned long pulseDuration = 0;
+volatile bool pulseDetected = false;
+
+// 函数声明
+void pulseInterrupt();
+
+void setup() {
+  u8g2.begin();
+  u8g2.enableUTF8Print();
+  // 初始化串口
+  Serial.begin(115200);
+
+  // 设置外部PWM输入引脚为输入模式
+  pinMode(PWM_INPUT_PIN, INPUT);
+ // 配置输出PWM引脚
+  ledcSetup(0, 8000, 8); // 使用LED控制器0，设置频率为5000Hz，分辨率为8位
+  ledcAttachPin(LED, 0); // 将PWM输出引脚连接到LED控制器0的通道
+  ledcWrite(0, 128); // 设置占空比为50%（0-255范围内）
+  // 附加中断处理函数到外部PWM输入引脚
+  attachInterrupt(digitalPinToInterrupt(PWM_INPUT_PIN), pulseInterrupt, CHANGE);
+
+  // 输出提示信息
+  Serial.println("Listening for PWM pulses...");
+  //数据存储
+  /* 定义一个NVS操作句柄 */
+  nvs_handle my_HandleNvs;
+  /* 打开一个NVS命名空间 */
+  nvs_open("WiFi_cfg", NVS_READWRITE, &my_HandleNvs);
+  nvs_set_u32(my_HandleNvs,"wifi_update",Number);//这里的Number是存储的数据
+  nvs_commit(my_HandleNvs);
+  nvs_close(my_HandleNvs);
+}
+
+void loop() {
+  // 检测到脉冲
+  if (pulseDetected) {
+    noInterrupts(); // 关闭中断，确保处理时不会被打断
+
+    // 处理脉冲
+    unsigned long duration = pulseDuration;
+
+    // 重置标志和计时器
+    pulseDetected = false;
+    pulseDuration = 0;
+
+    interrupts(); // 打开中断
+
+    // 计算频率
+    float frequency = 1000000.0 / duration/2; // 将脉冲持续时间转换为频率（单位：Hz）
+
+    // 输出频率
+    Serial.print("PWM Frequency: ");
+    Serial.print(frequency);
+    Serial.println(" Hz");
+    u8g2.firstPage();
+  do
+  {
+    u8g2.setFont(u8g2_font_ncenR14_tf);
+    u8g2.setFontPosTop();
+    
+    u8g2.setCursor(0,5);
+    u8g2.print("NUM:");
+    u8g2.setCursor(70,5);
+    u8g2.print(Number);
+    
+    u8g2.setCursor(0,45);
+    u8g2.print(frequency);
+    u8g2.setCursor(90,45);
+    u8g2.print("HZ");
+  }
+  while (u8g2.nextPage());
+  }
+}
+
+// 脉冲中断处理函数
+void pulseInterrupt() {
+  if (digitalRead(PWM_INPUT_PIN) == HIGH) {
+    pulseStartTime = micros(); // 记录脉冲开始时间
+  } else {
+    pulseEndTime = micros(); // 记录脉冲结束时间
+    pulseDuration = pulseEndTime - pulseStartTime; // 计算脉冲持续时间
+    pulseDetected = true; // 设置脉冲检测标志
+  }
+}
